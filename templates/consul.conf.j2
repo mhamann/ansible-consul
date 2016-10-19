@@ -4,6 +4,11 @@ description "Consul Agent"
 start on (local-filesystems and net-device-up IFACE!=lo)
 stop on runlevel [016]
 
+pre-start script
+  # Allow non-root to bind to privileged ports (if used)
+  setcap CAP_NET_BIND_SERVICE=+eip {{ consul_home }}/bin/consul
+end script
+
 script
 {% if consul_dynamic_bind %}
   # Get the public IP
@@ -14,13 +19,10 @@ script
   # Get the public IP
   CLIENT_BIND=`ifconfig eth0 | grep "inet addr" | awk '{ print substr($2,6) }'`
 {% endif %}
-
-  # Allow non-root to bind to privileged ports (if used)
-  setcap CAP_NET_BIND_SERVICE=+eip {{ consul_home }}/bin/consul
-
   # Set GOMAXPROCS to use all our CPUs, because Consul can block a scheduler thread
-  # Use su to become consul user non-interactively on old Upstart versions (see http://superuser.com/a/234541/76168)
-  exec su -s /bin/sh -c 'GOMAXPROCS=`nproc` exec "$0" "$@" &>>{{ consul_log_file }}' consul -- /opt/consul/bin/consul agent \
+  exec sudo -n GOMAXPROCS=`nproc` \
+    -u consul -g consul \
+    {{ consul_home }}/bin/consul agent \
 {% if consul_dynamic_bind %}
     -bind=$BIND \
 {% endif %}
@@ -28,7 +30,8 @@ script
     -client=$CLIENT_BIND \
 {% endif %}
     -config-dir={{ consul_config_dir }} \
-    -config-file={{ consul_config_file }}
+    -config-file={{ consul_config_file }} \
+    >>{{ consul_log_file }} 2>&1
 end script
 
 {% if consul_leave_on_terminate -%}
